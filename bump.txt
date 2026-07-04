@@ -1,1 +1,1 @@
-deploy 4 jul 2026 18:00
+test plano 4 jul
