@@ -182,6 +182,7 @@ const RUTINA = [
 {t:'Día 2 · ESPALDA', s:'tirón · bíceps · antebrazo · abs', ej:[
   ['Dominadas en G7 (o jalón UNICA si no salen)','4×5-10 · RIR 1-2'],
   ['Remo en máquina','4×6-10 · RIR 1-2 · 2-3 min'],
+  ['Pull-over en polea alta (brazos rectos)','3×10-15 · RIR 1'],
   ['Curl bíceps (barra o predicador UNICA)','3×8-12 · RIR 1'],
   ['Curl martillo mancuernas','3×10-15 · RIR 0-1'],
   ['Antebrazo: curl de muñeca con barra','3×15-20 · RIR 1'],
@@ -216,16 +217,45 @@ const RUTINA = [
  ]},
 ];
 const CARDIO_NOTA = 'Cardio (3 días/semana): 30-45 min a elegir — correr, bici Technogym o pádel. Márcalo en el calendario como CARDIO. Y los 10.000 pasos van aparte: esos caen todos los días.';
+const slug = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+/* Layout ANTIGUO (v3 con historial posicional e{dia}_{ejercicio}) — solo para migrar registros viejos. NO tocar. */
+const OLD_LAYOUT = [
+ ['Press banca con barra','Pec deck en máquina (UNICA)','Cruce de poleas G7 (el "abrazo")','Press militar de pie con barra','Elevaciones laterales mancuernas','Extensión tríceps en polea (cuerda)','Extensión tríceps sobre cabeza en polea'],
+ ['Dominadas en G7 (o jalón UNICA si no salen)','Remo en máquina','Curl bíceps (barra o predicador UNICA)','Curl martillo mancuernas','Antebrazo: curl de muñeca con barra','Abs'],
+ ['Sentadilla con barra','Hack squat','Peso muerto rumano con barra','Extensión de cuádriceps','Curl femoral (UNICA)','Gemelo de pie (mancuerna o en hack)','Abductora','Abs'],
+ ['Press banca con barra','Jalón al pecho en UNICA','Pec deck en máquina (UNICA)','Remo en polea baja G7 (o con barra)','Hombro posterior en polea (face pull / pájaro)'],
+ ['Hack squat pies altos (énfasis glúteo/femoral)','Zancadas con mancuernas','Hip thrust con barra (espalda en banco)','Curl femoral (UNICA)','Crunch en polea alta (cuerda)','Elevaciones de piernas colgado (ab strap G7)','Curl de bíceps en polea (superserie)','Extensión de tríceps en polea (superserie)'],
+];
+/* Migra historial posicional → IDs por NOMBRE (estables aunque se reordene la rutina). Idempotente. */
+function migra(log){
+  const out = {};
+  const add = (nid, ses) => {
+    if(!out[nid]) out[nid]=[];
+    const ex = out[nid].find(x=>x.d===ses.d);
+    if(ex){ ex.sets = ex.sets.concat(ses.sets); } else { out[nid].push({d:ses.d, sets:ses.sets.slice()}); }
+  };
+  for(const k in log){
+    const m = k.match(/^e(\d+)_(\d+)$/);
+    let nid;
+    if(m && OLD_LAYOUT[+m[1]] && OLD_LAYOUT[+m[1]][+m[2]]) nid = 'n_'+slug(OLD_LAYOUT[+m[1]][+m[2]]);
+    else if(k.indexOf('n_')===0) nid = k;
+    else nid = 'n_'+slug(k);
+    (log[k]||[]).forEach(s=>add(nid, s));
+  }
+  for(const k in out) out[k].sort((a,b)=>a.d<b.d?-1:1);
+  return out;
+}
 const KEY = 'titanv3';
-const load = () => { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return {dias:s.dias||{}, log:s.log||{}}; } catch(e){ return {dias:{}, log:{}}; } };
+const load = () => { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return {dias:s.dias||{}, log:migra(s.log||{})}; } catch(e){ return {dias:{}, log:{}}; } };
 let S = load();
 const save = () => localStorage.setItem(KEY, JSON.stringify(S));
 const ESTADOS = ['gym','cardio','both','rest','miss'];
 const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const hoyISO = () => iso(new Date());
 const fmtFecha = k => { const p=k.split('-'); return new Date(+p[0],+p[1]-1,+p[2]).toLocaleDateString('es-ES',{weekday:'short', day:'numeric', month:'short'}); };
-const ejId = (di,ei) => 'e'+di+'_'+ei;
-const ejNombre = id => { const m=id.match(/^e(\d+)_(\d+)$/); return m ? RUTINA[+m[1]].ej[+m[2]][0] : id; };
+const ejId = (di,ei) => 'n_'+slug(RUTINA[di].ej[ei][0]);
+const NAMES = {}; RUTINA.forEach(d=>d.ej.forEach(e=>{ NAMES['n_'+slug(e[0])]=e[0]; }));
+const ejNombre = id => NAMES[id] || id;
 function sesionHoy(id){ const arr=S.log[id]||[]; return arr.find(x=>x.d===hoyISO()); }
 function addSet(id, reps, kg){
   if(!S.log[id]) S.log[id]=[];
@@ -330,24 +360,41 @@ function actualizaUlt(ejEl){
 function pintaProgSel(){
   const sel = document.getElementById('progSel');
   let h='';
-  RUTINA.forEach((d,di)=>{ h+='<optgroup label="'+d.t+'">'; d.ej.forEach((e,ei)=>{ h+='<option value="'+ejId(di,ei)+'">'+e[0]+'</option>'; }); h+='</optgroup>'; });
+  const vistos = {};
+  RUTINA.forEach((d,di)=>{ h+='<optgroup label="'+d.t+'">'; d.ej.forEach((e,ei)=>{ const id=ejId(di,ei); if(vistos[id])return; vistos[id]=1; h+='<option value="'+id+'">'+e[0]+'</option>'; }); h+='</optgroup>'; });
   sel.innerHTML=h;
   sel.onchange=pintaProg;
 }
+let progMet = 'kg';
 function pintaProg(){
   const id = document.getElementById('progSel').value;
   const cont = document.getElementById('progBody');
   const arr = S.log[id]||[];
   if(!arr.length){ cont.innerHTML='<div class="vacio">Sin registros de <b>'+ejNombre(id)+'</b> todavía.<br>Apunta series desde la pestaña Rutina con el botón ＋.</div>'; return; }
-  const mejorReps = sets => Math.max.apply(null, sets.map(s=>parseInt(s[0])||0));
   const esCorporal = arr.every(x=>mejorKg(x.sets)===0);
-  const medida = esCorporal ? mejorReps : mejorKg;
-  const unidad = esCorporal ? ' reps' : ' kg';
-  const prs = arr.map(x=>medida(x.sets));
+  const bestReps = sets => Math.max.apply(null, sets.map(s=>parseInt(s[0])||0));
+  /* 1RM estimado (fórmula de Epley): kg × (1 + reps/30). Estándar en Hevy/Strong. */
+  const bestE1 = sets => Math.round(Math.max.apply(null, sets.map(s=>{ const kg=parseFloat(s[1])||0, r=parseInt(s[0])||0; return kg>0 ? kg*(1+r/30) : 0; }))*10)/10;
+  /* Volumen de la sesión: Σ reps×kg (o reps totales si es a peso corporal). */
+  const vol = sets => Math.round(sets.reduce((a,s)=>{ const kg=parseFloat(s[1])||0, r=parseInt(s[0])||0; return a + (esCorporal ? r : r*kg); },0));
+  const METS = esCorporal
+    ? [{k:'kg',n:'Mejor reps',f:bestReps,u:' reps'},{k:'vol',n:'Reps totales',f:vol,u:' reps'}]
+    : [{k:'kg',n:'Mejor kg',f:mejorKg,u:' kg'},{k:'e1',n:'1RM est.',f:bestE1,u:' kg'},{k:'vol',n:'Volumen',f:vol,u:' kg'}];
+  if(!METS.some(m=>m.k===progMet)) progMet = METS[0].k;
+  const M = METS.find(m=>m.k===progMet);
+  const prs = arr.map(x=>M.f(x.sets));
   const pr = Math.max.apply(null, prs);
   const prFecha = arr[prs.indexOf(pr)].d;
+  let tendencia = '—';
+  if(arr.length>1){
+    const a=M.f(arr[arr.length-2].sets), b=M.f(arr[arr.length-1].sets);
+    if(a>0){ const pct=Math.round((b-a)/a*100); tendencia=(pct>0?'▲ +':pct<0?'▼ ':'= ')+pct+'%'; }
+  }
+  const chips = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">'+METS.map(m=>
+    '<button class="metbtn" data-k="'+m.k+'" style="padding:7px 13px;border-radius:999px;border:1px solid #2a3442;font-weight:700;font-size:12.5px;'
+    +(m.k===progMet?'background:#f0b429;color:#0b111a':'background:#111a26;color:#c7d1de')+'">'+m.n+'</button>').join('')+'</div>';
   const ult = arr.slice(-20);
-  const vals = ult.map(x=>medida(x.sets));
+  const vals = ult.map(x=>M.f(x.sets));
   const min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
   const W=320,H=110,P=14;
   const fx = i => vals.length===1 ? W/2 : P + i*(W-2*P)/(vals.length-1);
@@ -355,12 +402,20 @@ function pintaProg(){
   let path=''; vals.forEach((v,i)=>{ path += (i?' L':'M')+fx(i).toFixed(1)+' '+fy(v).toFixed(1); });
   let dots=''; vals.forEach((v,i)=>{ dots+='<circle cx="'+fx(i).toFixed(1)+'" cy="'+fy(v).toFixed(1)+'" r="3.4" fill="#f0b429"/>'; });
   const svg = '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto"><path d="'+path+'" fill="none" stroke="#f0b429" stroke-width="2.5" stroke-linejoin="round"/>'+dots
-    +'<text x="'+P+'" y="12" fill="#8b96a5" font-size="10">'+max+unidad+'</text><text x="'+P+'" y="'+(H-3)+'" fill="#8b96a5" font-size="10">'+min+unidad+'</text></svg>';
-  const hist = arr.slice().reverse().map(x=>'<div class="sesion"><div class="f">'+fmtFecha(x.d)+' · '+x.d+'</div><div class="s">'+resumenSets(x.sets)+'</div><div class="mejor">mejor de la sesión: '+mejorKg(x.sets)+' kg'+(mejorKg(x.sets)===pr?' 🏆':'')+'</div></div>').join('');
-  cont.innerHTML =
-    '<div class="pr-card"><div><b>'+pr+unidad+'</b><small>récord ('+fmtFecha(prFecha)+')</small></div><div><b>'+arr.length+'</b><small>sesiones registradas</small></div></div>'
-    +'<div class="grafica"><h3>Mejor '+(esCorporal?'nº de reps':'kg')+' por sesión — '+ejNombre(id)+'</h3>'+svg+'</div>'
+    +'<text x="'+P+'" y="12" fill="#8b96a5" font-size="10">'+max+M.u+'</text><text x="'+P+'" y="'+(H-3)+'" fill="#8b96a5" font-size="10">'+min+M.u+'</text></svg>';
+  const hist = arr.slice().reverse().map(x=>{
+    const detalle = esCorporal
+      ? 'mejor: '+bestReps(x.sets)+' reps · total: '+vol(x.sets)+' reps'
+      : 'mejor: '+mejorKg(x.sets)+' kg · 1RM est: '+bestE1(x.sets)+' kg · vol: '+vol(x.sets)+' kg';
+    return '<div class="sesion"><div class="f">'+fmtFecha(x.d)+' · '+x.d+'</div><div class="s">'+resumenSets(x.sets)+'</div><div class="mejor">'+detalle+(M.f(x.sets)===pr?' 🏆':'')+'</div></div>';
+  }).join('');
+  cont.innerHTML = chips
+    +'<div class="pr-card"><div><b>'+pr+M.u+'</b><small>récord '+M.n.toLowerCase()+' ('+fmtFecha(prFecha)+')</small></div>'
+    +'<div><b>'+tendencia+'</b><small>vs sesión anterior</small></div>'
+    +'<div><b>'+arr.length+'</b><small>sesiones</small></div></div>'
+    +'<div class="grafica"><h3>'+M.n+' por sesión — '+ejNombre(id)+'</h3>'+svg+'</div>'
     +'<div class="hist">'+hist+'</div>';
+  cont.querySelectorAll('.metbtn').forEach(b=>{ b.onclick=()=>{ progMet=b.dataset.k; pintaProg(); }; });
 }
 let mes = new Date().getFullYear()===2026 ? new Date().getMonth() : 0;
 const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -389,7 +444,7 @@ document.getElementById('btnExport').onclick=()=>{
 document.getElementById('fileImport').onchange=(ev)=>{
   const f=ev.target.files[0]; if(!f)return;
   const r=new FileReader();
-  r.onload=()=>{ try{ const j=JSON.parse(r.result); if(j&&(j.dias||j.log)){ S={dias:j.dias||{}, log:j.log||{}}; save(); pintaHoy(); pintaRutina(); pintaCal(); stats(); pintaProg(); alert('Respaldo importado ✔'); } else alert('Archivo no válido'); }catch(e){ alert('Archivo no válido'); } };
+  r.onload=()=>{ try{ const j=JSON.parse(r.result); if(j&&(j.dias||j.log)){ S={dias:j.dias||{}, log:migra(j.log||{})}; save(); pintaHoy(); pintaRutina(); pintaCal(); stats(); pintaProg(); alert('Respaldo importado ✔'); } else alert('Archivo no válido'); }catch(e){ alert('Archivo no válido'); } };
   r.readAsText(f);
 };
 document.getElementById('btnReset').onclick=()=>{ if(confirm('¿Seguro? Se borra TODO el progreso.')&&confirm('Última oportunidad: ¿borrar todo?')){ S={dias:{},log:{}}; save(); pintaHoy(); pintaRutina(); pintaCal(); stats(); pintaProg(); } };
